@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtualenv
+.venv/
+
+# Tooling caches and local output
+.pytest_cache/
+# junit.xml + report.html, written by every run (see the hook in conftest.py)
+reports/
+*.log
+
+# macOS
+.DS_Store
+

@@ -1,0 +1,28 @@
+# Target environment configuration.
+#
+# These values are the source of truth for a local run; environment variables
+# are overrides only (handy in CI) and are never required:
+#
+#   PISMO_ENV         -> replaces `environment` below            (prism|staging|test)
+#   PISMO_BASE_URL    -> replaces `environments.<name>.base_url`
+#   PISMO_TIMEOUT_S   -> replaces `timeout_s`
+#
+# The same overrides are available per run: `pytest --env staging --base-url URL`.
+
+environment: prism
+
+# Applied to every environment; a key in an environment block wins over these.
+defaults:
+  timeout_s: 10
+
+environments:
+  # Prism mock server started from the contract that lives in this repository:
+  #   prism mock -p 8080 contract/transactions-service.v1.yaml
+  prism:
+    base_url: http://localhost:8080
+  # Real (or shared) test environment. Set the URL here or export PISMO_BASE_URL;
+  # while it stays empty, tests are skipped with an actionable reason.
+  staging:
+    base_url: ""
+  test:
+    base_url: ""
