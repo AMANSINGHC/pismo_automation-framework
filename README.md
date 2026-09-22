@@ -26,8 +26,9 @@ python -m pytest -m smoke -v
 ## Where to run it
 
 The Base URL comes from `src/config/environments.yaml`; environment variables are
-overrides only. Every run prints the environment it is about to exercise in the
-report header. `make test` activates `.venv` inside its recipe shell; by hand,
+overrides only. Every run prints the environment it is about to exercise, on the
+header line pytest emits before the first test. `make test` activates `.venv` inside
+its recipe shell; by hand,
 activate once per shell (or skip activation and prefix each run with
 `PATH="$PWD/.venv/bin:$PATH"`):
 
@@ -45,27 +46,45 @@ virtualenv yet, instead of falling back to a system python.
 An environment without a base URL (for example `staging` as shipped) skips the run
 with an actionable message instead of failing.
 
+## Parallel runs (opt-in)
+
+The same suite split across worker processes by `pytest-xdist`; the two report files
+and everything else about a run are unchanged:
+
+```bash
+make test-parallel                            # 4 workers
+make test-parallel WORKERS=auto               # one per physical core
+PYTEST_ADDOPTS="-n auto" python -m pytest     # turn it on without editing the file
+```
+
+`-n` is not in `pytest.ini` on purpose: a default run stays single-process, so its
+order and the number of API calls it makes are predictable, and `PYTEST_ADDOPTS`
+(applied after `addopts`) turns parallelism on without editing the repository. Two
+rules keep the suite distributable — no test may depend on another test's state or
+on execution order, and `parametrize` inputs must be ordered (a `set` breaks
+distribution). One consequence to know: session-scoped fixtures run once **per
+worker**, so `-n4` issues up to four `POST /accounts`. At the current size (3 tests
+against the local mock) a parallel run is *slower* than a plain one, because worker
+startup costs more than the tests do; it pays off as the suite grows, or against a
+remote environment where each test waits on the network.
+
 ## Reports
 
 Every run writes the same two files — no separate command to remember:
 
 | File | Written for |
 |---|---|
-| `reports/junit.xml` | CI: one `<testcase>` per test with its duration, each failure's message, and a `pismo` property stating the environment the run exercised |
-| `reports/report.html` | a human: the same results as one self-contained page (no sibling asset files) with the environment table, openable straight from the filesystem |
+| `reports/junit.xml` | CI: one `<testcase>` per test with its duration, and each failure's message verbatim (`--junit-xml`, from pytest itself) |
+| `reports/report.html` | a human: the same results as one self-contained page (no sibling asset files) with the environment table pytest-metadata adds, openable straight from the filesystem (`--html --self-contained-html`, from pytest-html) |
 
-Both are output rather than source, and `reports/` is gitignored. The defaults come
-from `conftest.py` and apply only to options a run leaves unset, so pointing them
-somewhere else still works:
+Both are output rather than source, and `reports/` is gitignored. The flags live in
+`pytest.ini` (`addopts`), so every run writes them — `pytest` by hand, an IDE run,
+`make test` — while an explicit `--junit-xml`/`--html` on the command line still
+wins, which is how a CI job points them at its own results directory:
 
 ```bash
-python -m pytest --junitxml=/tmp/junit.xml --html=/tmp/report.html
+python -m pytest --junit-xml=/tmp/junit.xml --html=/tmp/report.html --self-contained-html
 ```
-
-The failure message is the payload of a report, which is why the assertion helpers
-build a verbose one on purpose: it names the request, the status expected and
-received, and quotes the response body. A body therefore reaches a report only as
-part of a message a test author wrote.
 
 ## Layout
 

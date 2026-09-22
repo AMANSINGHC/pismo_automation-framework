@@ -7,7 +7,7 @@ __pycache__/
 
 # Tooling caches and local output
 .pytest_cache/
-# junit.xml + report.html, written by every run (see the hook in conftest.py)
+# junit.xml + report.html from the last run (written by every pytest run)
 reports/
 *.log
 

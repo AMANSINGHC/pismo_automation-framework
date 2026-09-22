@@ -2,6 +2,8 @@
 PYTHON ?= python3.12
 VENV ?= .venv
 PORT ?= 8080
+# Workers for `make test-parallel`: any `-n` value pytest-xdist accepts (4, auto).
+WORKERS ?= auto
 
 # Recipes run through `sh`, one shell per line, so the venv has to be activated in
 # the same shell as the command: `$(ACTIVATE) python ...` is the makefile equivalent
@@ -11,7 +13,7 @@ PORT ?= 8080
 VENV_DIR := $(CURDIR)/$(VENV)
 ACTIVATE := . $(VENV_DIR)/bin/activate &&
 
-.PHONY: venv install check-venv mock test test-smoke clean
+.PHONY: venv install check-venv mock test test-smoke test-parallel clean
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -33,6 +35,14 @@ test: check-venv
 
 test-smoke: check-venv
 	$(ACTIVATE) python -m pytest -m smoke -v
+
+# Same suite and same two report files, split across worker processes. Opt-in: the
+# default `test` target stays single-process, so a run's order and the number of API
+# calls it makes are predictable. WORKERS takes any `-n` value: 4 (default), auto.
+test-parallel: check-venv
+	@$(ACTIVATE) python -c "import xdist" 2>/dev/null || \
+		{ echo "pytest-xdist is not installed - run 'make install'."; exit 1; }
+	$(ACTIVATE) python -m pytest -n $(WORKERS) -v
 
 clean:
 	rm -rf $(VENV) .pytest_cache
