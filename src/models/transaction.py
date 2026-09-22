@@ -1,6 +1,6 @@
 """Wire shapes and operation-type semantics for APIs exposed by ``transactions`` service."""
 
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Any, Mapping
 from dataclasses import dataclass, fields
 
@@ -12,6 +12,13 @@ class OperationType(IntEnum):
     INSTALLMENT_PURCHASE = 2
     WITHDRAWAL = 3
     CREDIT_VOUCHER = 4
+
+
+class TransactionType(str, Enum):
+    """How the ``type`` field spells the direction the money moved."""
+
+    DEBIT = "debit"
+    CREDIT = "credit"
 
 
 @dataclass(frozen=True)

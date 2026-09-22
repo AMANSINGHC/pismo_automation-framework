@@ -2,6 +2,9 @@
 
 import random
 
+# Far above the small ids an environment hands out and still inside the contract's `integer`
+# type, so no run of this suite can have created it.
+UNKNOWN_ACCOUNT_ID = 999_999_999
 DOCUMENT_NUMBER_MIN_LENGTH = 10
 DOCUMENT_NUMBER_MAX_LENGTH = 14
 DEFAULT_DOCUMENT_NUMBER_LENGTH = 11

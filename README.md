@@ -9,7 +9,7 @@ mock by default, so the suite works from a clean clone with no backend running.
 ```bash
 make install      # .venv on python3.12 + pinned requirements
 make mock         # Prism mock of the contract on http://localhost:8080 (leave it running)
-make test-smoke   # one happy-path test per endpoint; writes reports/ (see below)
+make test-smoke   # the happy path per endpoint; writes reports/ (see below)
 ```
 
 By hand, if you prefer (`source .venv/bin/activate` is what the Makefile does for
@@ -63,7 +63,7 @@ order and the number of API calls it makes are predictable, and `PYTEST_ADDOPTS`
 rules keep the suite distributable — no test may depend on another test's state or
 on execution order, and `parametrize` inputs must be ordered (a `set` breaks
 distribution). One consequence to know: session-scoped fixtures run once **per
-worker**, so `-n4` issues up to four `POST /accounts`. At the current size (3 tests
+worker**, so `-n4` issues up to four `POST /accounts`. At the current size (20 tests
 against the local mock) a parallel run is *slower* than a plain one, because worker
 startup costs more than the tests do; it pays off as the suite grows, or against a
 remote environment where each test waits on the network.

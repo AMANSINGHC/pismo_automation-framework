@@ -31,16 +31,16 @@ def assert_shape(payload: Any, spec: Mapping[str, Any]) -> None:
     assert not mismatched, f"Unexpected field types: {mismatched}; payload: {payload!r}"
 
 
-def assert_iso8601(value: Any, *, field: str = "value") -> datetime:
+def assert_iso8601(value: Any) -> datetime:
     """Assert an ISO-8601 date-time string, returning the parsed value."""
     assert isinstance(value, str), (
-        f"{field} must be a string, got {type(value).__name__}: {value!r}"
+        f"Expected an ISO-8601 date-time string, got {type(value).__name__}: {value!r}"
     )
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise AssertionError(f"{field}={value!r} is not a valid ISO-8601 date-time: {exc}") from exc
-    assert parsed.tzinfo is not None, f"{field}={value!r} carries no timezone information"
+        raise AssertionError(f"{value!r} is not a valid ISO-8601 date-time: {exc}") from exc
+    assert parsed.tzinfo is not None, f"{value!r} carries no timezone information"
     return parsed
 
 
