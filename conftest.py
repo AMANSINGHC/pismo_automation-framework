@@ -1,14 +1,8 @@
-"""Run-wide pytest configuration: target environment selection.
+"""Run-wide pytest configuration and environment selection.
 
-The tests never build URLs, sessions or payloads themselves: they receive a
-service client already wired to whichever environment the run selected. Target
-selection is documented in ``src/config/environments.yaml`` and available per
-run via ``pytest --env``/``--base-url``.
-
-The pieces that configure a *run* rather than a test package live here, at the
-repository root: the CLI options, the header that states which environment a run
-exercised, and the session-scoped ``settings`` fixture. The service-client
-fixtures built on top of them stay in ``tests/conftest.py``.
+CLI/environment configuration is resolved here and exposed through the
+session-scoped ``settings`` fixture. Service-client fixtures remain in
+``tests/conftest.py``.
 """
 
 import pytest
@@ -23,7 +17,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         dest="pismo_env",
         default=None,
         metavar="NAME",
-        help="Environment from settings (prism|staging|test). Overrides PISMO_ENV.",
+        help="Environment from settings (prism|staging). Overrides PISMO_ENV.",
     )
     group.addoption(
         "--base-url",

@@ -39,7 +39,6 @@ class HttpClient:
         """
         method = str(method).upper()
         url = self._url(path)
-        request_headers = {**dict(self._settings.headers), **(headers or {})}
         request_timeout = timeout if timeout is not None else self._settings.timeout_s
 
         return self._session.request(
@@ -47,15 +46,15 @@ class HttpClient:
             url,
             json=json_body,
             params=params,
-            headers=request_headers,
+            headers=headers,
             timeout=request_timeout,
             allow_redirects=False,
         )
 
     def close(self) -> None:
+        """Close the underlying HTTP session."""
         self._session.close()
 
     def _url(self, path: str) -> str:
-        if path.startswith(("http://", "https://")):
-            return path
+        """Resolve a service-relative path against the configured base URL."""
         return urljoin(f"{self._settings.base_url}/", path.lstrip("/"))

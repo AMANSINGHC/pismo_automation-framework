@@ -63,7 +63,7 @@ order and the number of API calls it makes are predictable, and `PYTEST_ADDOPTS`
 rules keep the suite distributable — no test may depend on another test's state or
 on execution order, and `parametrize` inputs must be ordered (a `set` breaks
 distribution). One consequence to know: session-scoped fixtures run once **per
-worker**, so `-n4` issues up to four `POST /accounts`. At the current size (21 tests
+worker**, so `-n4` issues up to four `POST /accounts`. At the current size (22 tests
 against the local mock) a parallel run is *slower* than a plain one, because worker
 startup costs more than the tests do; it pays off as the suite grows, or against a
 remote environment where each test waits on the network.
@@ -101,6 +101,7 @@ src/models/          typed request/response shapes from the contract
 tests/               shared fixtures (conftest.py)
 tests/accounts/      one file per Accounts endpoint
 tests/transactions/  one file per Transactions endpoint
+tests/e2e/           cross-service user journey (account → transactions)
 tests/data.py        test-data helpers (unique document numbers)
 ```
 

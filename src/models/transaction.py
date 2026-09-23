@@ -29,8 +29,8 @@ class CreateTransactionRequest:
 
     def to_payload(self) -> dict[str, Any]:
         return {
-            "account_id": int(self.account_id),
-            "amount": float(self.amount),
+            "account_id": self.account_id,
+            "amount": self.amount,
             "operation_type_id": int(self.operation_type_id),
         }
 
@@ -48,12 +48,12 @@ class TransactionResponse:
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "TransactionResponse":
         return cls(
-            transaction_id=int(payload["transaction_id"]),
-            account_id=int(payload["account_id"]),
-            amount=float(payload["amount"]),
-            operation_type_id=int(payload["operation_type_id"]),
-            type=str(payload["type"]),
-            event_date=str(payload["event_date"]),
+            transaction_id=payload["transaction_id"],
+            account_id=payload["account_id"],
+            amount=payload["amount"],
+            operation_type_id=payload["operation_type_id"],
+            type=payload["type"],
+            event_date=payload["event_date"],
         )
 
 

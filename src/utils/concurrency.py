@@ -12,6 +12,9 @@ def run_concurrently(calls: Sequence[Callable[[], T]]) -> list[T]:
 
     Every call is submitted before any result is read, so they really overlap.
     """
-    with ThreadPoolExecutor(max_workers=max(len(calls), 1)) as pool:
+    if not calls:
+        return []
+    
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
         futures = [pool.submit(call) for call in calls]
         return [future.result() for future in futures]

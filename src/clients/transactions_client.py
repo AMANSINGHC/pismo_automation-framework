@@ -8,7 +8,6 @@ from src.utils.transport.api_response import ApiResponse
 from src.models.transaction import CreateTransactionRequest
 
 TRANSACTIONS_PATH = "/transactions"
-
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 
 
@@ -36,6 +35,8 @@ class TransactionsClient(BaseServiceClient):
         attempts: int,
     ) -> list[ApiResponse]:
         """Send one transaction `attempts` times in flight under a single key."""
+        if attempts < 1:
+            raise ValueError("attempts must be greater than zero")
         return run_concurrently(
             [
                 partial(self.create_transaction, request, idempotency_key=idempotency_key)

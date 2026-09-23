@@ -11,35 +11,31 @@ from src.models.transaction import (
 )
 from http import HTTPStatus
 from src.models.account import AccountResponse
+from src.utils.transport.api_response import ApiResponse
 from src.clients.transactions_client import TransactionsClient
 from src.models.error import ERROR_RESPONSE_FIELDS, ErrorResponse
-from tests.data import UNKNOWN_ACCOUNT_ID, unique_idempotency_key
+from tests.data import NON_EXISTENT_ACCOUNT_ID, unique_idempotency_key
 from src.utils.assertions import assert_iso8601, assert_shape, assert_status
 
-ZERO_AMOUNT = 0.0
+pytestmark = pytest.mark.transactions
+
+DEFAULT_AMOUNT = 100.5
 INTEGER_AMOUNT = 50
-DECIMAL_AMOUNT = 50.75
-TRANSACTION_AMOUNT = 100.5
-NEGATIVE_AMOUNT = -TRANSACTION_AMOUNT
-ZERO_AMOUNT_ERROR = "amount can't be zero"
+SUB_UNIT_AMOUNT = 0.01
+HIGH_PRECISION_AMOUNT = 10.123456
+
+ZERO_AMOUNT = 0.0
+NEGATIVE_AMOUNT = -DEFAULT_AMOUNT
+
 CONCURRENT_ATTEMPTS = 5
+
+UNKNOWN_OPERATION_TYPE_ID = 5
+
+ZERO_AMOUNT_ERROR = "amount can't be zero"
 UNKNOWN_ACCOUNT_ERROR = "account doesn't exist"
 NEGATIVE_AMOUNT_ERROR = "amount can't be negative"
-UNKNOWN_OPERATION_TYPE_ID = 5
 UNKNOWN_OPERATION_TYPE_ERROR = "possible operation type - 1, 2, 3, 4"
-
-MOCK_REPLAYS_EXAMPLE = pytest.mark.xfail(
-    reason="Prism replays the contract example for every request (operation_type_id 1, amount "
-    "-100.5, type debit), so no amount or operation type the request sent can be checked",
-    strict=False,
-)
-
-MOCK_ACCEPTS_INVALID_REQUEST = pytest.mark.xfail(
-    reason="The contract binds no 422 condition and no message text to a non-positive amount, an "
-    "unknown operation_type_id or an account that does not exist, and the mock validates "
-    "nothing, so it answers 201 with the example instead.",
-    strict=False,
-)
+MISSING_IDEMPOTENCY_KEY_ERROR = "idempotency key is required"
 
 EXPECTED_SIGN_AND_TYPE = {
     OperationType.NORMAL_PURCHASE: (-1, TransactionType.DEBIT),
@@ -49,68 +45,125 @@ EXPECTED_SIGN_AND_TYPE = {
 }
 
 
-@pytest.mark.transactions
+def _assert_transaction_created(
+    response: ApiResponse,
+    request: CreateTransactionRequest,
+    expected_sign: int,
+    expected_type: TransactionType,
+) -> TransactionResponse:
+    """Validate the common contract and transaction-response invariants."""
+    assert_status(response, HTTPStatus.CREATED)
+    assert_shape(response.body, TRANSACTION_RESPONSE_FIELDS)
+
+    transaction = response.model(TransactionResponse)
+    assert transaction.account_id == request.account_id, (
+        f"Expected account_id {request.account_id} as sent, got {transaction.account_id}: "
+        f"{response.body}"
+    )
+    assert_iso8601(transaction.event_date)
+    assert transaction.operation_type_id == request.operation_type_id, (
+        f"Expected operation_type_id {request.operation_type_id} as sent, got "
+        f"{transaction.operation_type_id}: {response.body}"
+    )
+    assert transaction.transaction_id > 0, (
+        f"Expected transaction_id to be positive, got {transaction.transaction_id}: "
+        f"{response.body}"
+    )
+
+    assert transaction.type == expected_type, (
+        f"Expected type {expected_type} for operation_type_id {request.operation_type_id}, "
+        f"got {transaction.type}: {response.body}"
+    )
+    assert transaction.amount == expected_sign * request.amount, (
+        f"Expected amount {expected_sign * request.amount} (sign {expected_sign} applied to "
+        f"{request.amount} as sent), got {transaction.amount}: {response.body}"
+    )
+    return transaction
+
+
 class TestCreateTransaction:
 
     @pytest.mark.smoke
-    @MOCK_REPLAYS_EXAMPLE
     @pytest.mark.parametrize(
         "operation_type",
         [
-            pytest.param(OperationType.NORMAL_PURCHASE, id="normal-purchase"),
+            pytest.param(
+                OperationType.NORMAL_PURCHASE,
+                id="normal-purchase",
+                marks=pytest.mark.mock_compatible,
+            ),
             pytest.param(OperationType.INSTALLMENT_PURCHASE, id="installment-purchase"),
             pytest.param(OperationType.WITHDRAWAL, id="withdrawal"),
             pytest.param(OperationType.CREDIT_VOUCHER, id="credit-voucher"),
         ],
     )
-    def test_create_transaction(
+    def test_create_transaction_for_operation_type(
         self,
         transactions_client: TransactionsClient,
         existing_account: AccountResponse,
         operation_type: OperationType,
     ) -> None:
-        """Every documented operation type is accepted with 201 and recorded as the type sent."""
+        """Create a transaction for each operation type."""
         request = CreateTransactionRequest(
             account_id=existing_account.account_id,
-            amount=TRANSACTION_AMOUNT,
+            amount=DEFAULT_AMOUNT,
             operation_type_id=operation_type,
         )
 
         response = transactions_client.create_transaction(request)
 
-        assert_status(response, HTTPStatus.CREATED)
-        assert_shape(response.body, TRANSACTION_RESPONSE_FIELDS)
-
-        transaction = response.model(TransactionResponse)
-        assert transaction.account_id == existing_account.account_id
-        assert_iso8601(transaction.event_date)
-        assert transaction.operation_type_id == operation_type
-        assert transaction.transaction_id > 0
-        # The contract defines neither an operation type's sign/`type` 
+        # The contract defines neither an operation type's sign/`type`
         # (EXPECTED_SIGN_AND_TYPE is an assumption).
         expected_sign, expected_type = EXPECTED_SIGN_AND_TYPE[operation_type]
-        assert transaction.type == expected_type
-        assert transaction.amount == expected_sign * TRANSACTION_AMOUNT
+        _assert_transaction_created(response, request, expected_sign, expected_type)
+
+
+class TestTransactionAmount:
 
     @pytest.mark.smoke
-    @MOCK_REPLAYS_EXAMPLE
     @pytest.mark.parametrize(
         "amount",
         [
             pytest.param(INTEGER_AMOUNT, id="integer"),
-            pytest.param(DECIMAL_AMOUNT, id="decimal"),
+            pytest.param(
+                DEFAULT_AMOUNT,
+                id="decimal",
+                marks=pytest.mark.mock_compatible,
+            ),
         ],
     )
-    def test_amount_round_trip(
+    def test_amount_is_returned_with_expected_sign(
         self,
         transactions_client: TransactionsClient,
         existing_account: AccountResponse,
         amount: float,
     ) -> None:
-        """A whole-number and a fractional amount are recorded with the value the request sent."""
+        """The transaction amount is returned with the expected operation sign."""
         request = CreateTransactionRequest(
             account_id=existing_account.account_id,
             amount=amount,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
+        )
+
+        response = transactions_client.create_transaction(request)
+
+        assert_status(response, HTTPStatus.CREATED)
+
+        transaction = response.model(TransactionResponse)
+        expected_sign, _ = EXPECTED_SIGN_AND_TYPE[OperationType.NORMAL_PURCHASE]
+        assert transaction.amount == expected_sign * amount
+
+    @pytest.mark.smoke
+    @pytest.mark.nightly
+    def test_high_precision_amount_is_recorded(
+        self,
+        transactions_client: TransactionsClient,
+        existing_account: AccountResponse,
+    ) -> None:
+        """An amount with six decimals is accepted and returned with the debit sign."""
+        request = CreateTransactionRequest(
+            account_id=existing_account.account_id,
+            amount=HIGH_PRECISION_AMOUNT,
             operation_type_id=OperationType.NORMAL_PURCHASE,
         )
 
@@ -121,19 +174,49 @@ class TestCreateTransaction:
 
         transaction = response.model(TransactionResponse)
         expected_sign, _ = EXPECTED_SIGN_AND_TYPE[OperationType.NORMAL_PURCHASE]
-        assert transaction.amount == expected_sign * amount
+        # amount has no precision or rounding rule in the contract, so assert only the
+        # returned magnitude and the sign promised based on domain reasoning and assumption.
+        assert transaction.amount * expected_sign > 0, (
+            f"Expected the sign {expected_sign} the prose promises on {HIGH_PRECISION_AMOUNT} "
+            f"as sent, got {transaction.amount}: {response.body}"
+        )
 
+    @pytest.mark.smoke
+    @pytest.mark.nightly
+    def test_sub_unit_amount_is_recorded(
+        self,
+        transactions_client: TransactionsClient,
+        existing_account: AccountResponse,
+    ) -> None:
+        """A one-paisa amount is accepted and returned as sent, signed."""
+        request = CreateTransactionRequest(
+            account_id=existing_account.account_id,
+            amount=SUB_UNIT_AMOUNT,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
+        )
+
+        response = transactions_client.create_transaction(request)
+
+        # Storage units are not observable: no transaction state oracle is exposed,
+        # so the returned amount is the closest available evidence.
+        expected_sign, expected_type = EXPECTED_SIGN_AND_TYPE[OperationType.NORMAL_PURCHASE]
+        _assert_transaction_created(response, request, expected_sign, expected_type)
+
+
+@pytest.mark.idempotency
+class TestTransactionIdempotency:
+
+    @pytest.mark.nightly
     @pytest.mark.pre_release
-    @pytest.mark.idempotency
-    def test_same_idempotency_key_charges_once(
+    def test_same_idempotency_key_concurrent_replay(
         self,
         transactions_client: TransactionsClient,
         dedicated_account: AccountResponse,
     ) -> None:
-        """Copies of one transaction in flight under one idempotency key are recorded once."""
+        """Send the same transaction concurrently under one idempotency key."""
         request = CreateTransactionRequest(
             account_id=dedicated_account.account_id,
-            amount=TRANSACTION_AMOUNT,
+            amount=DEFAULT_AMOUNT,
             operation_type_id=OperationType.NORMAL_PURCHASE,
         )
         key = unique_idempotency_key()
@@ -142,83 +225,153 @@ class TestCreateTransaction:
             request, idempotency_key=key, attempts=CONCURRENT_ATTEMPTS
         )
 
-        for response in responses:
-            assert_status(response, HTTPStatus.CREATED)
+        assert len(responses) == CONCURRENT_ATTEMPTS
 
-        transactions = [response.model(TransactionResponse) for response in responses]
+        expected_sign, expected_type = EXPECTED_SIGN_AND_TYPE[OperationType.NORMAL_PURCHASE]
+        transactions = [
+            _assert_transaction_created(
+                response, request, expected_sign, expected_type
+            )
+            for response in responses
+        ]
+
         # No documented endpoint exposes transaction count or account transaction state.
         # Duplicate detection is therefore limited to the response.
-        # Diagnostic evidency only. NOT the correctness oracle.
+        # Diagnostic evidence only. NOT the correctness oracle.
         statuses = [(response.status_code, response.url) for response in responses]
         recorded = [
             (transaction.transaction_id, transaction.amount) for transaction in transactions
         ]
         evidence = f"statuses: {statuses}; transactions: {recorded}"
         transaction_ids = {transaction.transaction_id for transaction in transactions}
-    
+
         assert len(transaction_ids) == 1, (
             f"Expected one transaction for one idempotency key, got {len(transaction_ids)}; "
             f"{evidence}"
         )
-        # Query the transaction-state/count oracle for the created account and assert exactly 
-        # one transaction exists.
+        # Query the transaction-state/count oracle (not available) for the created account and 
+        # assert exactly one transaction exists.
 
+    @pytest.mark.nightly
+    @pytest.mark.pre_release
+    def test_same_idempotency_key_replays_original_response(
+        self,
+        transactions_client: TransactionsClient,
+        dedicated_account: AccountResponse,
+    ) -> None:
+        """A sequential replay of one key and body is answered 201 with the original result."""
+        request = CreateTransactionRequest(
+            account_id=dedicated_account.account_id,
+            amount=DEFAULT_AMOUNT,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
+        )
+        key = unique_idempotency_key()
         expected_sign, expected_type = EXPECTED_SIGN_AND_TYPE[OperationType.NORMAL_PURCHASE]
-        for transaction in transactions:
-            assert transaction.account_id == dedicated_account.account_id, evidence
-            assert_iso8601(transaction.event_date)
-            assert transaction.operation_type_id == OperationType.NORMAL_PURCHASE, evidence
-            assert transaction.type == expected_type, evidence
-            assert transaction.amount == expected_sign * TRANSACTION_AMOUNT, evidence
 
-    @MOCK_ACCEPTS_INVALID_REQUEST
+        first_response = transactions_client.create_transaction(request, idempotency_key=key)
+        first = _assert_transaction_created(
+            first_response, request, expected_sign, expected_type
+        )
+
+        replay_response = transactions_client.create_transaction(request, idempotency_key=key)
+
+        replay = _assert_transaction_created(
+            replay_response, request, expected_sign, expected_type
+        )
+        assert replay == first, (
+            f"Expected the replay to return the original transaction {first!r}, "
+            f"got {replay!r}: {replay_response.body}"
+        )
+        # Query the transaction-state/count oracle (not available) for the created account and 
+        # assert exactly one transaction exists.
+
+    @pytest.mark.nightly
+    @pytest.mark.pre_release
+    def test_same_idempotency_key_with_different_body_is_rejected(
+        self,
+        transactions_client: TransactionsClient,
+        existing_account: AccountResponse,
+    ) -> None:
+        """Reusing one idempotency key with a changed body is rejected with 409."""
+        key = unique_idempotency_key()
+        request = CreateTransactionRequest(
+            account_id=existing_account.account_id,
+            amount=DEFAULT_AMOUNT,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
+        )
+        # The replay carries the same key under a different body.
+        replayed = CreateTransactionRequest(
+            account_id=existing_account.account_id,
+            amount=DEFAULT_AMOUNT,
+            operation_type_id=OperationType.CREDIT_VOUCHER,
+        )
+
+        first = transactions_client.create_transaction(request, idempotency_key=key)
+
+        assert_status(first, HTTPStatus.CREATED)
+
+        response = transactions_client.create_transaction(replayed, idempotency_key=key)
+
+        assert_status(response, HTTPStatus.CONFLICT)
+        assert_shape(response.body, ERROR_RESPONSE_FIELDS)
+
+    @pytest.mark.nightly
+    @pytest.mark.negative
+    @pytest.mark.pre_release
+    def test_missing_idempotency_key_is_rejected(
+        self,
+        transactions_client: TransactionsClient,
+        dedicated_account: AccountResponse,
+    ) -> None:
+        """A request carrying no idempotency key is rejected with 400 and its message."""
+        request = CreateTransactionRequest(
+            account_id=dedicated_account.account_id,
+            amount=DEFAULT_AMOUNT,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
+        )
+
+        response = transactions_client.create_transaction(request)
+
+        assert_status(response, HTTPStatus.BAD_REQUEST)
+        assert_shape(response.body, ERROR_RESPONSE_FIELDS)
+
+        error = response.model(ErrorResponse)
+        assert error.error == MISSING_IDEMPOTENCY_KEY_ERROR
+
+
+@pytest.mark.negative
+class TestCreateTransactionNegative:
+
+    @pytest.mark.smoke
+    @pytest.mark.nightly
+    @pytest.mark.negative
     @pytest.mark.parametrize(
-        ("amount", "operation_type_id", "account_id", "expected_error"),
+        ("amount", "expected_error"),
         [
             pytest.param(
                 ZERO_AMOUNT,
-                OperationType.NORMAL_PURCHASE,
-                None,
                 ZERO_AMOUNT_ERROR,
                 id="zero-amount",
             ),
             pytest.param(
                 NEGATIVE_AMOUNT,
-                OperationType.NORMAL_PURCHASE,
-                None,
                 NEGATIVE_AMOUNT_ERROR,
                 id="negative-amount",
             ),
-            pytest.param(
-                TRANSACTION_AMOUNT,
-                UNKNOWN_OPERATION_TYPE_ID,
-                None,
-                UNKNOWN_OPERATION_TYPE_ERROR,
-                id="unknown-operation-type",
-            ),
-            pytest.param(
-                TRANSACTION_AMOUNT,
-                OperationType.NORMAL_PURCHASE,
-                UNKNOWN_ACCOUNT_ID,
-                UNKNOWN_ACCOUNT_ERROR,
-                id="unknown-account",
-            ),
         ],
     )
-    def test_create_transaction_with_invalid_request(
+    def test_invalid_amount_is_rejected(
         self,
         transactions_client: TransactionsClient,
         existing_account: AccountResponse,
         amount: float,
-        operation_type_id: int | OperationType,
-        account_id: int | None,
         expected_error: str,
     ) -> None:
-        """An invalid amount, operation type or account is rejected with 422 and its message."""
+        """A zero or negative amount is rejected with 422 and its message."""
         request = CreateTransactionRequest(
-            account_id=existing_account.account_id if account_id is None else account_id,
+            account_id=existing_account.account_id,
             amount=amount,
-            operation_type_id=operation_type_id,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
         )
 
         response = transactions_client.create_transaction(request)
@@ -228,3 +381,44 @@ class TestCreateTransaction:
 
         error = response.model(ErrorResponse)
         assert error.error == expected_error
+
+    @pytest.mark.smoke
+    def test_unknown_operation_type_is_rejected(
+        self,
+        transactions_client: TransactionsClient,
+        existing_account: AccountResponse,
+    ) -> None:
+        """An unknown operation type is rejected with 422 and its message."""
+        request = CreateTransactionRequest(
+            account_id=existing_account.account_id,
+            amount=DEFAULT_AMOUNT,
+            operation_type_id=UNKNOWN_OPERATION_TYPE_ID,
+        )
+
+        response = transactions_client.create_transaction(request)
+
+        assert_status(response, HTTPStatus.UNPROCESSABLE_ENTITY)
+        assert_shape(response.body, ERROR_RESPONSE_FIELDS)
+
+        error = response.model(ErrorResponse)
+        assert error.error == UNKNOWN_OPERATION_TYPE_ERROR
+
+    @pytest.mark.smoke
+    def test_unknown_account_is_rejected(
+        self,
+        transactions_client: TransactionsClient,
+    ) -> None:
+        """An unknown account is rejected with 422 and its message."""
+        request = CreateTransactionRequest(
+            account_id=NON_EXISTENT_ACCOUNT_ID,
+            amount=DEFAULT_AMOUNT,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
+        )
+
+        response = transactions_client.create_transaction(request)
+
+        assert_status(response, HTTPStatus.UNPROCESSABLE_ENTITY)
+        assert_shape(response.body, ERROR_RESPONSE_FIELDS)
+
+        error = response.model(ErrorResponse)
+        assert error.error == UNKNOWN_ACCOUNT_ERROR

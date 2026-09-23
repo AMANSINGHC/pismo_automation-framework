@@ -15,11 +15,12 @@ from src.models.error import ERROR_RESPONSE_FIELDS, ErrorResponse
 from src.models.account import ACCOUNT_RESPONSE_FIELDS, AccountResponse, CreateAccountRequest
 
 EMPTY_DOCUMENT_NUMBER = ""
-DOCUMENT_LENGTH_ERROR = "document_number should be b/w 10 and 14 digits"
 NON_DIGIT_DOCUMENT_NUMBER = "1" * (DEFAULT_DOCUMENT_NUMBER_LENGTH - 1) + "a"
-EMPTY_DOCUMENT_NUMBER_ERROR = "document_number can't be empty"
 BELOW_MINIMUM_DOCUMENT_NUMBER = "1" * (DOCUMENT_NUMBER_MIN_LENGTH - 1)
 ABOVE_MAXIMUM_DOCUMENT_NUMBER = "1" * (DOCUMENT_NUMBER_MAX_LENGTH + 1)
+
+DOCUMENT_LENGTH_ERROR = "document_number should be b/w 10 and 14 digits"
+EMPTY_DOCUMENT_NUMBER_ERROR = "document_number can't be empty"
 NON_DIGIT_DOCUMENT_NUMBER_ERROR = "document_number should only contain digits"
 DUPLICATE_DOCUMENT_NUMBER_ERROR = "document_number already exists"
 
@@ -31,9 +32,17 @@ class TestCreateAccount:
     @pytest.mark.parametrize(
         "document_number_length",
         [
-            pytest.param(DOCUMENT_NUMBER_MIN_LENGTH, id="minimum"),
+            pytest.param(
+                DOCUMENT_NUMBER_MIN_LENGTH, 
+                id="minimum", 
+                marks=pytest.mark.nightly,
+            ),
             pytest.param(DEFAULT_DOCUMENT_NUMBER_LENGTH, id="default"),
-            pytest.param(DOCUMENT_NUMBER_MAX_LENGTH, id="maximum"),
+            pytest.param(
+                DOCUMENT_NUMBER_MAX_LENGTH, 
+                id="maximum", 
+                marks=pytest.mark.nightly,
+            ),
         ],
     )
     def test_create_account(
@@ -51,15 +60,11 @@ class TestCreateAccount:
 
         account = response.model(AccountResponse)
         assert account.account_id > 0
-        # The contract uses 12345678900, but this test generates a unique number.
-        # In real environments, assert account.document_number == request.document_number.
-        assert account.document_number
+        assert account.document_number == request.document_number
 
-    @pytest.mark.xfail(
-        reason="The contract defines no document_number validation, so the mock returns 201 "
-        "instead of 400/422.",
-        strict=False,
-    )
+    @pytest.mark.smoke
+    @pytest.mark.nightly
+    @pytest.mark.negative
     @pytest.mark.parametrize(
         ("document_number", "expected_status", "expected_error"),
         [
@@ -107,11 +112,8 @@ class TestCreateAccount:
         error = response.model(ErrorResponse)
         assert error.error == expected_error
 
-    @pytest.mark.xfail(
-        reason="The contract documents no uniqueness rule and no 409 for POST /accounts, so "
-        "the mock answers 201 where this test expects 409.",
-        strict=False,
-    )
+    @pytest.mark.smoke
+    @pytest.mark.negative
     def test_create_account_with_duplicate_document_number(
         self, accounts_client: AccountsClient, existing_account: AccountResponse
     ) -> None:

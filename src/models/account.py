@@ -22,8 +22,8 @@ class AccountResponse:
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "AccountResponse":
         return cls(
-            account_id=int(payload["account_id"]),
-            document_number=str(payload["document_number"]),
+            account_id=payload["account_id"],
+            document_number=payload["document_number"],
         )
 
 

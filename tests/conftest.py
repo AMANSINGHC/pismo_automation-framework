@@ -6,10 +6,11 @@ from http import HTTPStatus
 from collections.abc import Iterator
 from src.config.settings import Settings
 from tests.data import unique_document_number
-from src.utils.transport.http_client import HttpClient
 from src.clients.accounts_client import AccountsClient
+from src.utils.transport.http_client import HttpClient
+from src.utils.assertions import assert_shape, assert_status
 from src.clients.transactions_client import TransactionsClient
-from src.models.account import AccountResponse, CreateAccountRequest
+from src.models.account import ACCOUNT_RESPONSE_FIELDS, AccountResponse, CreateAccountRequest
 
 
 @pytest.fixture(scope="session")
@@ -34,33 +35,32 @@ def transactions_client(http_client: HttpClient) -> TransactionsClient:
 
 @pytest.fixture(scope="session")
 def existing_account(accounts_client: AccountsClient) -> AccountResponse:
-    """An account that really exists, created over the API before the tests run."""
+    """An account created through the API and shared by tests requiring existing state.
+    
+    It is session-scoped and shared, so anything counting transactions on it would 
+    count the other tests' writes too.
+    """
     return _created_account(accounts_client)
 
 
 @pytest.fixture
 def dedicated_account(accounts_client: AccountsClient) -> AccountResponse:
-    """An account of one test's own, so no other test records against it.
-
-    `existing_account` is session-scoped and shared, so anything counting
-    transactions on it would count the other tests' writes too, and the contract
-    documents no way to delete an account — hence one account per test that needs
-    to observe an account's own history.
-    """
+    """Create a fresh account for the current test to isolate account state."""
     return _created_account(accounts_client)
 
 
 def _created_account(accounts_client: AccountsClient) -> AccountResponse:
-    """Create an account over the API, or fail loudly instead of looking like a test failure."""
-    response = accounts_client.create_account(
-        CreateAccountRequest(document_number=unique_document_number())
+    """Create an account over the API, asserting the documented creation response."""
+    request = CreateAccountRequest(
+        document_number=unique_document_number()
     )
+    response = accounts_client.create_account(request)
 
-    if response.status_code != HTTPStatus.CREATED:
-        raise RuntimeError(
-            f"Could not create the account this run needs: expected {HTTPStatus.CREATED} "
-            f"from {response.method} {response.url}, got {response.status_code}\n"
-            f"body: {response.body!r}"
-        )
+    assert_status(response, HTTPStatus.CREATED)
+    assert_shape(response.body, ACCOUNT_RESPONSE_FIELDS)
 
-    return response.model(AccountResponse)
+    account = response.model(AccountResponse)
+    assert account.account_id > 0
+    assert account.document_number == request.document_number
+    
+    return account

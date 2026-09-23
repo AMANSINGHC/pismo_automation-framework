@@ -11,7 +11,7 @@ class ErrorResponse:
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ErrorResponse":
-        return cls(error=str(payload.get("error", "")))
+        return cls(error=payload["error"])
 
 
 ERROR_RESPONSE_FIELDS: Mapping[str, Any] = {f.name: f.type for f in fields(ErrorResponse)}

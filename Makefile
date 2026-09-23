@@ -2,14 +2,10 @@
 PYTHON ?= python3.12
 VENV ?= .venv
 PORT ?= 8080
-# Workers for `make test-parallel`: any `-n` value pytest-xdist accepts (4, auto).
 WORKERS ?= auto
 
-# Recipes run through `sh`, one shell per line, so the venv has to be activated in
-# the same shell as the command: `$(ACTIVATE) python ...` is the makefile equivalent
-# of a hand-run `source .venv/bin/activate` session. Use `.`, not `source`: the
-# recipe shell is /bin/sh, not bash. $(CURDIR) keeps the path absolute, so
-# `make -C <dir>` and IDE runners behave the same.
+# Recipes run through /bin/sh. Activate the virtualenv in the same shell
+# as the command so all Python tooling comes from the project environment.
 VENV_DIR := $(CURDIR)/$(VENV)
 ACTIVATE := . $(VENV_DIR)/bin/activate &&
 
@@ -26,8 +22,10 @@ check-venv:
 install: venv
 	$(ACTIVATE) python -m pip install -r requirements.txt
 
-# Prism mock server generated from the contract in this repository.
+# Prism mock server generated from the OpenAPI contract in this repository.
 mock:
+	@command -v prism >/dev/null 2>&1 || \
+		{ echo "Prism CLI not found - install @stoplight/prism-cli."; exit 1; }
 	prism mock -p $(PORT) contract/transactions-service.v1.yaml
 
 test: check-venv
@@ -36,14 +34,13 @@ test: check-venv
 test-smoke: check-venv
 	$(ACTIVATE) python -m pytest -m smoke -v
 
-# Same suite and same two report files, split across worker processes. Opt-in: the
-# default `test` target stays single-process, so a run's order and the number of API
-# calls it makes are predictable. WORKERS takes any `-n` value: 4 (default), auto.
+# Parallel execution is opt-in so the default test run remains deterministic.
+# WORKERS accepts any value supported by pytest-xdist, e.g. 4 or auto.
 test-parallel: check-venv
 	@$(ACTIVATE) python -c "import xdist" 2>/dev/null || \
 		{ echo "pytest-xdist is not installed - run 'make install'."; exit 1; }
 	$(ACTIVATE) python -m pytest -n $(WORKERS) -v
 
 clean:
-	rm -rf $(VENV) .pytest_cache
+	rm -rf $(VENV) .pytest_cache reports
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
