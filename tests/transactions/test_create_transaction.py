@@ -2,7 +2,6 @@
 
 import pytest
 
-from tests.data import UNKNOWN_ACCOUNT_ID
 from src.models.transaction import (
     TRANSACTION_RESPONSE_FIELDS,
     CreateTransactionRequest,
@@ -14,6 +13,7 @@ from http import HTTPStatus
 from src.models.account import AccountResponse
 from src.clients.transactions_client import TransactionsClient
 from src.models.error import ERROR_RESPONSE_FIELDS, ErrorResponse
+from tests.data import UNKNOWN_ACCOUNT_ID, unique_idempotency_key
 from src.utils.assertions import assert_iso8601, assert_shape, assert_status
 
 ZERO_AMOUNT = 0.0
@@ -22,6 +22,7 @@ DECIMAL_AMOUNT = 50.75
 TRANSACTION_AMOUNT = 50.0
 NEGATIVE_AMOUNT = -TRANSACTION_AMOUNT
 ZERO_AMOUNT_ERROR = "amount can't be zero"
+CONCURRENT_ATTEMPTS = 5
 UNKNOWN_ACCOUNT_ERROR = "account doesn't exist"
 NEGATIVE_AMOUNT_ERROR = "amount can't be negative"
 UNKNOWN_OPERATION_TYPE_ID = 5
@@ -121,6 +122,55 @@ class TestCreateTransaction:
         transaction = response.model(TransactionResponse)
         expected_sign, _ = EXPECTED_SIGN_AND_TYPE[OperationType.NORMAL_PURCHASE]
         assert transaction.amount == expected_sign * amount
+
+    @pytest.mark.pre_release
+    @pytest.mark.idempotency
+    @MOCK_REPLAYS_EXAMPLE
+    def test_same_idempotency_key_charges_once(
+        self,
+        transactions_client: TransactionsClient,
+        dedicated_account: AccountResponse,
+    ) -> None:
+        """Copies of one transaction in flight under one idempotency key are recorded once."""
+        request = CreateTransactionRequest(
+            account_id=dedicated_account.account_id,
+            amount=TRANSACTION_AMOUNT,
+            operation_type_id=OperationType.NORMAL_PURCHASE,
+        )
+        key = unique_idempotency_key()
+
+        responses = transactions_client.create_transaction_concurrently(
+            request, idempotency_key=key, attempts=CONCURRENT_ATTEMPTS
+        )
+
+        for response in responses:
+            assert_status(response, HTTPStatus.CREATED)
+
+        transactions = [response.model(TransactionResponse) for response in responses]
+        # No documented endpoint exposes transaction count or account transaction state.
+        # Duplicate detection is therefore limited to the response.
+        # Diagnostic evidency only. NOT the correctness oracle.
+        statuses = [(response.status_code, response.url) for response in responses]
+        recorded = [
+            (transaction.transaction_id, transaction.amount) for transaction in transactions
+        ]
+        evidence = f"statuses: {statuses}; transactions: {recorded}"
+        transaction_ids = {transaction.transaction_id for transaction in transactions}
+    
+        assert len(transaction_ids) == 1, (
+            f"Expected one transaction for one idempotency key, got {len(transaction_ids)}; "
+            f"{evidence}"
+        )
+        # Query the transaction-state/count oracle for the created account and assert exactly 
+        # one transaction exists.
+
+        expected_sign, expected_type = EXPECTED_SIGN_AND_TYPE[OperationType.NORMAL_PURCHASE]
+        for transaction in transactions:
+            assert transaction.account_id == dedicated_account.account_id, evidence
+            assert_iso8601(transaction.event_date)
+            assert transaction.operation_type_id == OperationType.NORMAL_PURCHASE, evidence
+            assert transaction.type == expected_type, evidence
+            assert transaction.amount == expected_sign * TRANSACTION_AMOUNT, evidence
 
     @MOCK_ACCEPTS_INVALID_REQUEST
     @pytest.mark.parametrize(

@@ -1,5 +1,6 @@
 """Test-data helpers."""
 
+import uuid
 import random
 
 # Far above the small ids an environment hands out and still inside the contract's `integer`
@@ -19,3 +20,8 @@ def unique_document_number(length: int = DEFAULT_DOCUMENT_NUMBER_LENGTH) -> str:
         )
     first_digit = random.choice("123456789")
     return first_digit + "".join(random.choices("0123456789", k=length - 1))
+
+
+def unique_idempotency_key() -> str:
+    """Return an idempotency key no other request in this run can carry."""
+    return uuid.uuid4().hex

@@ -35,6 +35,23 @@ def transactions_client(http_client: HttpClient) -> TransactionsClient:
 @pytest.fixture(scope="session")
 def existing_account(accounts_client: AccountsClient) -> AccountResponse:
     """An account that really exists, created over the API before the tests run."""
+    return _created_account(accounts_client)
+
+
+@pytest.fixture
+def dedicated_account(accounts_client: AccountsClient) -> AccountResponse:
+    """An account of one test's own, so no other test records against it.
+
+    `existing_account` is session-scoped and shared, so anything counting
+    transactions on it would count the other tests' writes too, and the contract
+    documents no way to delete an account — hence one account per test that needs
+    to observe an account's own history.
+    """
+    return _created_account(accounts_client)
+
+
+def _created_account(accounts_client: AccountsClient) -> AccountResponse:
+    """Create an account over the API, or fail loudly instead of looking like a test failure."""
     response = accounts_client.create_account(
         CreateAccountRequest(document_number=unique_document_number())
     )

@@ -25,7 +25,7 @@ never write them.
 | Add/change an assertion or scenario | `tests/<service>/test_<endpoint>.py` | no HTTP/plumbing in a test |
 | Add an operation to a service | `src/clients/<service>_client.py` (keep path constants there) | no assertions in a client |
 | Add/change a request or response field | `src/models/<service>.py` | don't invent a field the contract lacks (§8) |
-| Add a reusable assertion | `src/utils/assertions.py` | don't import clients or `requests` there |
+| Add a reusable assertion or test helper | `src/utils/assertions.py`, `src/utils/concurrency.py` | don't import clients or `requests` there |
 | Point a run at another environment | `src/config/environments.yaml` | never read env vars outside `src/config` |
 | Change base URL / timeout / header logic | `src/config/settings.py` | no domain knowledge in config |
 | Change fixtures (HTTP layer, clients, shared state) | `tests/conftest.py` | not for per-test data (that is `tests/data.py`) |
@@ -94,13 +94,13 @@ python -m pytest --env staging --base-url https://…   # then the same suite on
   real environment (`PISMO_ENV=… PISMO_BASE_URL=… python -m pytest`, or fill `base_url` in
   `src/config/environments.yaml`). An environment that has no base URL yet skips the run
   with the exact place to set it (§5) — that is configuration, not a test failure.
-- **Green looks like:** the `pismo:` header line, `collected 20 items`, `4 passed, 16 xfailed`
+- **Green looks like:** the `pismo:` header line, `collected 21 items`, `4 passed, 17 xfailed`
   (the `xfailed` nodes are the deliberately parked mock-vs-real cases, §9: the five account
   validation cases, `test_get_unknown_account`, all four `test_create_transaction` types, the
-  two `test_amount_round_trip` amounts and the four invalid-request cases of
-  `test_create_transaction_with_invalid_request` — Prism replays the contract example, so no
-  amount, sign, `type` or operation type is echoed, and it applies no amount, operation-type or
-  account rule at all),
+  two `test_amount_round_trip` amounts, `test_same_idempotency_key_charges_once` and the four
+  invalid-request cases of `test_create_transaction_with_invalid_request` — Prism replays the
+  contract example, so no amount, sign, `type` or operation type is echoed, and it applies no
+  amount, operation-type or account rule at all),
   plus `- generated xml file: …/reports/junit.xml -` and `- Generated html report: …`. A
   missing header line means configuration is broken, not that the tests are fine.
 - Never call a change verified on a subset: a marker selection (`-m …`), `-k` and `--env`
@@ -114,6 +114,7 @@ python -m pytest --env staging --base-url https://…   # then the same suite on
 | `http_client` | `tests/conftest.py` | session | `HttpClient` bound to the environment; `close()`d on teardown |
 | `accounts_client` / `transactions_client` | `tests/conftest.py` | session | service clients over that one HTTP layer |
 | `existing_account` | `tests/conftest.py` | session | an `AccountResponse` for an account really created over the API |
+| `dedicated_account` | `tests/conftest.py` | function | an `AccountResponse` for an account only that one test records against |
 
 Rules:
 - A test **asks for** what it needs as a parameter and annotates the type
@@ -131,6 +132,11 @@ Rules:
 - Fixtures never assert the thing under test (that is the test's job) and never swallow
   exceptions; the client methods return the response untouched so the test can assert it.
 - Fixtures that create remote state are also the reason `-n` costs extra API calls — see §12.
+- A per-test fixture has to earn its extra setup `POST`: `dedicated_account` is the only
+  function-scoped one here, and it exists so a test can observe an account's **own** history
+  without the shared account's other writes in it (`existing_account` is shared by every
+  transaction test); both fixtures share the private `_created_account` helper, so the loud
+  `RuntimeError` precondition exists once.
 
 ## 5. Configuration and environment handling
 
@@ -256,7 +262,7 @@ Where the contract is silent — do not invent a rule:
 |---|---|
 | No `securityDefinitions`; no auth mechanism anywhere (C3a finding) | Never add credentials, tokens, auth headers or auth env vars — `_default_headers()` explains why |
 | `amount` has no min/max/precision; the sign rule is prose only ("send a positive amount, the server applies the sign"), and the response example is `-100.5` while the request example is `50` | Never assert bounds, rounding or an unstated precision. `test_create_transaction` **does** assert the amount as sent, signed (`expected_sign * TRANSACTION_AMOUNT`), and the `type`, from `EXPECTED_SIGN_AND_TYPE` — a caller-supplied assumption, labelled as such in the code and reported as a gap, not a contract rule, and not evidence that the YAML echoes the amount or defines the sign. `test_amount_round_trip` reuses that signed expectation for a whole-number and a fractional amount — the model writes every amount as a JSON number, so the integer case leaves as `50.0`, and the decimal case is chosen to be exactly representable — and `test_create_transaction_with_invalid_request` carries the 422 for `0` and for a negative amount **plus** the exact message the service answers each with (`amount can't be zero`, `amount can't be negative`) — the same kind of caller-supplied assumption about a rule the prose only implies, and about text the YAML never states: parked, and never presented as a bound or a message the contract sets. That test also carries two cases this row's neighbours would otherwise each grow their own test for (an unknown `operation_type_id`, an account that does not exist): four near-identical bodies for four invalid inputs is the duplication this skill keeps warning about, so a new 422 trigger is a `pytest.param` here, adding a case without adding a test |
-| No idempotency key, no duplicate-submission semantics | Never double-send a `POST` to prove "charged once"; never retry a POST (§ transport rules) |
+| No idempotency key, no duplicate-submission semantics | Never double-send a `POST` to prove "charged once", and never retry a POST (§ transport rules). One caller-agreed exception exists: `test_same_idempotency_key_charges_once` sends `CONCURRENT_ATTEMPTS` copies of one body in flight under one generated key (`unique_idempotency_key()`), because reaching the behaviour at all takes concurrent duplicates — the key travels as `IDEMPOTENCY_KEY_HEADER`, a caller-supplied assumption the client labels as such, and the test asserts only what the contract makes observable (every copy answered 201 with the documented shape, one `transaction_id` across them, the amount and `type` the body sent). "Exactly one transaction exists" is **not** assertable: no operation returns a transaction count or state for an account, so that assertion is parked and the gap reported, never faked against a route the contract does not define |
 | `operation_type_id` has no `enum` (1–4 exist only in prose); no definition has `required` | Don't invent an allowed-value list out of the four types, and don't assume a missing field is rejected — but a real service **is** known to reject an unknown id with 422 `possible operation type - 1, 2, 3, 4`, whose own text corroborates that the prose list is exhaustive while leaving it unstated: that case sits in `test_create_transaction_with_invalid_request[unknown-operation-type]` (`UNKNOWN_OPERATION_TYPE_ID = 5`, one past the list), parked with the rest of that test because the YAML binds no 422 condition. The response echo is asserted for every documented type — and on the mock the whole `test_create_transaction` is parked (§9), never weakened |
 | `account_id` on `POST /transactions` has no existence rule in the YAML (and no request field is ever `required`) | Don't invent one, and never assert a `404` for a write: a real service answers `422 account doesn't exist` for an account that is not there, and `test_create_transaction_with_invalid_request[unknown-account]` asserts exactly that (`UNKNOWN_ACCOUNT_ID` from `tests/data.py`, parked with the rest of the test because the YAML binds no 422 condition). `GET /accounts/{id}` words the same condition `account not found` — and `errorResponse.error`'s only `example` is that wording — so neither is a message the contract fixes: keep one constant per endpoint, never copy one across, and report the pair as a finding |
 | `document_number: string` with no `minLength`/`maxLength`/`pattern` | Don't present or assert `tests/data.py`'s 10–14 bound as a contract rule — park the length cases as `xfail` (§9), as `test_create_account_with_invalid_document_number` does — that one test carries every invalid-input case as data, the non-digit `422` included, because `expected_status` is a parameter alongside `expected_error`; the 409 (duplicate) case in that file is parked the same way, none of those rules being in the YAML |
@@ -296,7 +302,11 @@ gaps before blaming a red run:
   states (no `minimum`/`maximum` on `amount`, no `enum` on `operation_type_id`, no
   account-existence rule): the mock answers 201 with a transaction body that has no `error`
   field, so the run stops at the status assertion and the message check is never reached — it
-  cannot pass vacuously.
+  cannot pass vacuously. Duplicate submission is the same fidelity gap: two `POST /transactions`
+  with one `Idempotency-Key` both answer the contract example (`transaction_id 1`), so the set of
+  responses is identical whether a service deduplicates or not — `test_same_idempotency_key_charges_once`
+  is parked for exactly that reason, and the count it would need has no documented read to come
+  from (§8).
 - **Request validation is off by default.** Negative tests that rely on it need
   `prism mock --errors` on the mock, and their real home is the real environment; without
   the flag a violated schema is not an error response.
@@ -433,7 +443,7 @@ the point of the boundary.
   (`--max-worker-restart=0`) so a crashed worker never re-executes a test that already
   changed state — and never add a retry to a `POST`.
 - Verify a parallel run like any other: same two report files, same test count, header line
-  still printed once. At the current size (20 tests) parallel is **slower** than sequential;
+  still printed once. At the current size (21 tests) parallel is **slower** than sequential;
   it pays off as the suite grows or when tests wait on the network. Say that instead of
   overselling it.
 
@@ -497,7 +507,7 @@ Then confirm, explicitly:
   pyproject, ruff, flake8, tox, pre-commit or CI workflow in this repo). The neighbour file
   is the style contract: wrap around 88–100, and check before you finish —
   `git ls-files '*.py' | xargs awk 'length>100'` must print nothing. The 89–100 band is where
-  the suite lives (36 tracked lines across `src/` + `tests/` when this was written; the exact
+  the suite lives (43 tracked lines across `src/` + `tests/` when this was last measured; the exact
   number is a snapshot, not a quota to fill or trim). Propose tooling in your summary; never
   smuggle a global reformat into a behavioural change.
 - **Structure:** keep `__init__.py` files empty (packages are plain), keep one-file-per-
@@ -520,9 +530,9 @@ Then confirm, explicitly:
    with the `curl` probe in §3 instead of concluding the mock is broken.
 5. `--strict-config` turns a mistyped key in `pytest.ini` into a failure of **every** run —
    intentional; fix the key, don't drop the flag.
-6. `20 skipped` / `skipped="20"` with a reason means the selected environment has no base URL
+6. `21 skipped` / `skipped="21"` with a reason means the selected environment has no base URL
    (`--env staging` reproduces it). Read the header line before debugging a "broken" suite.
-   `skipped="16"` in a mock run is not that: `xfail` also lands in that JUnit attribute, so
+   `skipped="17"` in a mock run is not that: `xfail` also lands in that JUnit attribute, so
    check those nodes are `type="pytest.xfail"`, not `pytest.skip`, before blaming configuration.
 7. Two test modules with the same basename in different folders abort collection with
    "import file mismatch" (reproduced). Rename; don't add `__init__.py` files to fix it.

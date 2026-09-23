@@ -63,7 +63,7 @@ order and the number of API calls it makes are predictable, and `PYTEST_ADDOPTS`
 rules keep the suite distributable — no test may depend on another test's state or
 on execution order, and `parametrize` inputs must be ordered (a `set` breaks
 distribution). One consequence to know: session-scoped fixtures run once **per
-worker**, so `-n4` issues up to four `POST /accounts`. At the current size (20 tests
+worker**, so `-n4` issues up to four `POST /accounts`. At the current size (21 tests
 against the local mock) a parallel run is *slower* than a plain one, because worker
 startup costs more than the tests do; it pays off as the suite grows, or against a
 remote environment where each test waits on the network.
@@ -95,7 +95,7 @@ docs/                C1 strategy, C3a contract audit, C4 framework notes
 reports/             junit.xml + report.html from the last run (gitignored)
 src/config/          Base URL + HTTP settings resolution (environments.yaml)
 src/clients/         service clients, one method per operation (accounts, transactions)
-src/utils/           assertion helpers shared by the test modules
+src/utils/           shared test helpers (assertions, concurrency)
 src/utils/transport/ HTTP layer + ApiResponse envelope (domain-free)
 src/models/          typed request/response shapes from the contract
 tests/               shared fixtures (conftest.py)
