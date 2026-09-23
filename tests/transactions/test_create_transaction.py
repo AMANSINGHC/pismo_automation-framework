@@ -19,7 +19,7 @@ from src.utils.assertions import assert_iso8601, assert_shape, assert_status
 ZERO_AMOUNT = 0.0
 INTEGER_AMOUNT = 50
 DECIMAL_AMOUNT = 50.75
-TRANSACTION_AMOUNT = 50.0
+TRANSACTION_AMOUNT = 100.5
 NEGATIVE_AMOUNT = -TRANSACTION_AMOUNT
 ZERO_AMOUNT_ERROR = "amount can't be zero"
 CONCURRENT_ATTEMPTS = 5
@@ -125,7 +125,6 @@ class TestCreateTransaction:
 
     @pytest.mark.pre_release
     @pytest.mark.idempotency
-    @MOCK_REPLAYS_EXAMPLE
     def test_same_idempotency_key_charges_once(
         self,
         transactions_client: TransactionsClient,

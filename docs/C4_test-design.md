@@ -7,6 +7,6 @@ Amount Edge Case Matrix: `artifacts/C4_test-design_tracebality-matrix.pdf`
 Traceability Matrix: `artifacts/C4_test-design_tracebality-matrix.pdf`
 
 **CI Gates with Scope:**
-- **PR** - Contract lint; Contract tests; Critical account, transaction and HTTP tests.
+- **PR** - Contract validation; Contract tests; Critical account, transaction and HTTP tests.
 - **Nightly** - Full boundaries, money probe, idempotency scenarios, very large inputs and additional negative scenarios.
 - **Prerelease** - Full critical suite, idempotency scenarios, transaction state and audit integration checks.
