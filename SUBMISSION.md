@@ -9,7 +9,9 @@
 ## 0. Read this first
 
 **What I Built** - API automation framework for Transactions Service using Python/Pytest, with a Prism mock as the default environment and a configuration to support staging environment. The submission includes a risk-based test strategy, contract audit, executable contract tests, functional/API coverage, traceability, an incident analysis for PISMO-4412, a E2E user journey, defect predictions, and AI-assisted engineering notes.
+
 **What I Found** - The most important findings are that idempotency is described in hearsay but not in the contract, the published APIs does not expose enough state to prove the required exactly-one transaction behavior under concurrency, and audit creation/atomicity is not externally verifiable. 
+
 **What I Fix** - Before real-money use, I would require the idempotency contract and transaction-state oracle to be defined and verified, together with a guarantee for atomic business/audit writes.
 
 ---
