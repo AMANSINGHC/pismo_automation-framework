@@ -9,7 +9,7 @@ WORKERS ?= auto
 VENV_DIR := $(CURDIR)/$(VENV)
 ACTIVATE := . $(VENV_DIR)/bin/activate &&
 
-.PHONY: venv install check-venv mock test test-smoke test-parallel clean
+.PHONY: venv install check-venv mock test test-smoke test-contract test-parallel clean
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -33,6 +33,9 @@ test: check-venv
 
 test-smoke: check-venv
 	$(ACTIVATE) python -m pytest -m smoke -v
+
+test-contract: check-venv
+	$(ACTIVATE) python -m pytest -m contract -v
 
 # Parallel execution is opt-in so the default test run remains deterministic.
 # WORKERS accepts any value supported by pytest-xdist, e.g. 4 or auto.

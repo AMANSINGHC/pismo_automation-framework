@@ -15,7 +15,7 @@ ACCOUNT_NOT_FOUND_ERROR = "account not found"
 @pytest.mark.accounts
 class TestGetAccount:
 
-    @pytest.mark.prerelease
+    @pytest.mark.pre_release
     def test_get_existing_account(
         self, accounts_client: AccountsClient, existing_account: AccountResponse
     ) -> None:
